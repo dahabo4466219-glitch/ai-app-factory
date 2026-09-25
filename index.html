@@ -43,8 +43,11 @@ input,textarea,select{font-family:inherit;font-size:15px}
 .sub{color:var(--muted);font-size:14px;margin:0 0 18px}
 .row{display:flex;gap:14px;flex-wrap:wrap}
 .grid{display:grid;gap:14px}
-.grid-4{grid-template-columns:repeat(4,1fr)}
-.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid>*{min-width:0}
+.card{min-width:0;max-width:100%;overflow-wrap:anywhere}
+pre{max-width:100%;overflow-x:auto}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .card.p{padding:16px}
 .stat{padding:16px}
@@ -126,7 +129,7 @@ textarea{min-height:110px;resize:vertical}
 
 @media(max-width:820px){
   .grid-4{grid-template-columns:repeat(2,1fr)}
-  .grid-2{grid-template-columns:1fr}
+  .grid-2{grid-template-columns:minmax(0,1fr)}
   .nav-desktop{display:none}
   .menu-toggle{display:block}
   .kv{grid-template-columns:1fr}
@@ -398,7 +401,7 @@ function callModel(agentKey, system, user){
         temperature:0.4 };
     /* Reasoning models (gpt-oss) spend output tokens on hidden reasoning first.
        The Builder writes whole files, so keep its reasoning short to leave room for code. */
-    if(/gpt-oss/i.test(model)) oaBody.reasoning_effort = (agentKey==="builder") ? "low" : "medium";
+    if(/gpt-oss/i.test(model)) oaBody.reasoning_effort = (agentKey==="builder" || agentKey==="qa") ? "low" : "medium";
     makeCall = function(){ return fetch(b + "/chat/completions", {
       method:"POST",
       headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+s.apiKey },
@@ -406,13 +409,13 @@ function callModel(agentKey, system, user){
     }).then(handleOpenAI); };
   }
   return withRetry(makeCall, 3, agentKey).catch(function(err){
-    if(agentKey==="builder" && err && err.message===TRUNC_MSG){
-      rlBanner("Builder output was cut off \u2014 retrying once\u2026");
+    if((agentKey==="builder" || agentKey==="qa") && err && err.message===TRUNC_MSG){
+      rlBanner((agentKey==="qa"?"QA":"Builder")+" output was cut off \u2014 retrying once\u2026");
       return withRetry(makeCall, 2, agentKey).then(function(r){ rlBanner(""); return r; },
                                                    function(e2){ rlBanner(""); throw e2; });
     }
     throw err;
-  });
+  }).catch(function(err){ try{ if(err && typeof err==="object" && !err.agent) err.agent=agentKey; }catch(_){} throw err; });
 }
 var TRUNC_MSG = "Output truncated — the model ran out of output room (max_tokens). Use a model with larger output for the Builder, or ask for fewer/smaller files.";
 function handleOpenAI(res){
@@ -604,7 +607,7 @@ function enforceHonestQA(p, q){
    QA writes small declarative tests (fill / click / expect). The app runs them
    against the built page in a hidden sandboxed iframe (no same-origin, no eval of
    model code) and the real pass/fail replaces guesses. */
-var UI_MAX_TESTS=8, UI_TEST_TIMEOUT=8000;
+var UI_MAX_TESTS=6, UI_TEST_TIMEOUT=8000;
 var UI_RUNNER = "(function(){var errs=[];"
  + "window.addEventListener('error',function(e){errs.push(String(e&&e.message||'error'));});"
  + "function Q(s){try{return document.querySelector(s);}catch(e){return null;}}"
@@ -732,6 +735,7 @@ function runQA(p){
     +"steps fill inputs / click buttons using CSS selectors that EXIST in the CODE (prefer #ids), then expect checks an element's visible text "
     +"(text_contains), visibility (visible:true|false) or count. Cover the main features and every USER-REPORTED ISSUE. Compute expected values exactly "
     +"(e.g. bill 50 at 18% -> tip \"9.00\", total \"59.00\"). Keep expectations short and robust (numbers, not whole sentences)."
+    +" Be concise: summary max 3 sentences, bug detail/fix max 2 sentences each."
     +" IMPORTANT: your ui_tests WILL be executed in a real browser right after you answer, and their pass/fail automatically fills verified/failed. "
     +"So: do NOT list features covered by your ui_tests in untested; do NOT write that no runtime verification was done; "
     +"use untested only for things a UI test cannot check. Base the verdict ONLY on real bugs you find in the code: "
@@ -1141,7 +1145,7 @@ function wfStepObj(p,key){ for(var i=0;i<p.workflow.steps.length;i++){ if(p.work
 function wfLabel(w,key){ for(var i=0;i<w.steps.length;i++){ if(w.steps[i].key===key) return w.steps[i].label; } return key; }
 function classifyError(err){
   var st = err && err.status; var msg = (err && err.message) || "";
-  if(/output truncated/i.test(msg)) return "Builder output was cut off twice. Tap Resume/Retry once more; if it repeats, set a different Builder model in Settings (e.g. llama-3.3-70b-versatile on Groq) or simplify the request.";
+  if(/output truncated/i.test(msg)) return ((err&&err.agent)==="qa"?"QA":"Builder")+" output was cut off twice. Tap Resume/Retry once more; if it repeats, set a different "+((err&&err.agent)==="qa"?"QA":"Builder")+" model in Settings (e.g. llama-3.3-70b-versatile on Groq) or simplify the request.";
   /* Sandbox runner errors (checked first so they are not mistaken for model errors) */
   if(/sandbox runner unreachable/i.test(msg)) return "Runner unreachable — set ALLOWED_ORIGIN on Render exactly as shown above, confirm the service is Live, then Resume.";
   if(/sandbox runner url/i.test(msg)) return "Fix the Sandbox runner URL in Settings, then Resume.";
