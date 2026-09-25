@@ -43,11 +43,8 @@ input,textarea,select{font-family:inherit;font-size:15px}
 .sub{color:var(--muted);font-size:14px;margin:0 0 18px}
 .row{display:flex;gap:14px;flex-wrap:wrap}
 .grid{display:grid;gap:14px}
-.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
-.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
-.grid>*{min-width:0}
-.card{min-width:0;max-width:100%;overflow-wrap:anywhere}
-pre{max-width:100%;overflow-x:auto}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
 .card.p{padding:16px}
 .stat{padding:16px}
@@ -129,7 +126,7 @@ textarea{min-height:110px;resize:vertical}
 
 @media(max-width:820px){
   .grid-4{grid-template-columns:repeat(2,1fr)}
-  .grid-2{grid-template-columns:minmax(0,1fr)}
+  .grid-2{grid-template-columns:1fr}
   .nav-desktop{display:none}
   .menu-toggle{display:block}
   .kv{grid-template-columns:1fr}
@@ -401,7 +398,7 @@ function callModel(agentKey, system, user){
         temperature:0.4 };
     /* Reasoning models (gpt-oss) spend output tokens on hidden reasoning first.
        The Builder writes whole files, so keep its reasoning short to leave room for code. */
-    if(/gpt-oss/i.test(model)) oaBody.reasoning_effort = (agentKey==="builder" || agentKey==="qa") ? "low" : "medium";
+    if(/gpt-oss/i.test(model)) oaBody.reasoning_effort = (agentKey==="builder") ? "low" : "medium";
     makeCall = function(){ return fetch(b + "/chat/completions", {
       method:"POST",
       headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+s.apiKey },
@@ -409,13 +406,13 @@ function callModel(agentKey, system, user){
     }).then(handleOpenAI); };
   }
   return withRetry(makeCall, 3, agentKey).catch(function(err){
-    if((agentKey==="builder" || agentKey==="qa") && err && err.message===TRUNC_MSG){
-      rlBanner((agentKey==="qa"?"QA":"Builder")+" output was cut off \u2014 retrying once\u2026");
+    if(agentKey==="builder" && err && err.message===TRUNC_MSG){
+      rlBanner("Builder output was cut off \u2014 retrying once\u2026");
       return withRetry(makeCall, 2, agentKey).then(function(r){ rlBanner(""); return r; },
                                                    function(e2){ rlBanner(""); throw e2; });
     }
     throw err;
-  }).catch(function(err){ try{ if(err && typeof err==="object" && !err.agent) err.agent=agentKey; }catch(_){} throw err; });
+  });
 }
 var TRUNC_MSG = "Output truncated — the model ran out of output room (max_tokens). Use a model with larger output for the Builder, or ask for fewer/smaller files.";
 function handleOpenAI(res){
@@ -607,7 +604,7 @@ function enforceHonestQA(p, q){
    QA writes small declarative tests (fill / click / expect). The app runs them
    against the built page in a hidden sandboxed iframe (no same-origin, no eval of
    model code) and the real pass/fail replaces guesses. */
-var UI_MAX_TESTS=6, UI_TEST_TIMEOUT=8000;
+var UI_MAX_TESTS=8, UI_TEST_TIMEOUT=8000;
 var UI_RUNNER = "(function(){var errs=[];"
  + "window.addEventListener('error',function(e){errs.push(String(e&&e.message||'error'));});"
  + "function Q(s){try{return document.querySelector(s);}catch(e){return null;}}"
@@ -735,7 +732,6 @@ function runQA(p){
     +"steps fill inputs / click buttons using CSS selectors that EXIST in the CODE (prefer #ids), then expect checks an element's visible text "
     +"(text_contains), visibility (visible:true|false) or count. Cover the main features and every USER-REPORTED ISSUE. Compute expected values exactly "
     +"(e.g. bill 50 at 18% -> tip \"9.00\", total \"59.00\"). Keep expectations short and robust (numbers, not whole sentences)."
-    +" Be concise: summary max 3 sentences, bug detail/fix max 2 sentences each."
     +" IMPORTANT: your ui_tests WILL be executed in a real browser right after you answer, and their pass/fail automatically fills verified/failed. "
     +"So: do NOT list features covered by your ui_tests in untested; do NOT write that no runtime verification was done; "
     +"use untested only for things a UI test cannot check. Base the verdict ONLY on real bugs you find in the code: "
@@ -747,54 +743,6 @@ function runQA(p){
     var tests=j.ui_tests; delete j.ui_tests;
     var q=enforceHonestQA(p, j);
     return runUiTests(p, tests).then(function(res){ return applyUiResults(p, q, res); }, function(){ return q; });
-  });
-}
-
-/* ---------- Patch 8: edit-based fixes ----------
-   Fixes ask the model for small search/replace edits instead of the whole file,
-   so large apps no longer hit the output limit. If an edit cannot be applied
-   exactly, we fall back to the old full-file rewrite. */
-function countOcc(hay, needle){ if(!needle) return 0; var n=0, i=0; while((i=hay.indexOf(needle,i))!==-1){ n++; i+=needle.length; } return n; }
-function applyEdits(files, edits){
-  var out=files.map(function(f){ return { path:f.path, language:f.language, content:String(f.content||"") }; });
-  var applied=0, failed=[];
-  for(var i=0;i<edits.length;i++){
-    var e=edits[i]||{}, f=null;
-    for(var k=0;k<out.length;k++){ if(out[k].path===e.path){ f=out[k]; break; } }
-    if(!f && out.length===1) f=out[0];
-    if(!f){ failed.push("unknown file "+e.path); continue; }
-    var find=String(e.find==null?"":e.find).replace(/\r\n/g,"\n"), rep=String(e.replace==null?"":e.replace);
-    var body=f.content.replace(/\r\n/g,"\n");
-    var c=countOcc(body, find);
-    if(c!==1){ var t=find.trim(); if(t && countOcc(body,t)===1){ find=t; rep=rep.trim(); c=1; } }
-    if(c!==1){ failed.push((c?"ambiguous":"not found")+": "+find.slice(0,60)); continue; }
-    var at=body.indexOf(find);
-    f.content=body.slice(0,at)+rep+body.slice(at+find.length); applied++;
-  }
-  return { files:out, applied:applied, failed:failed };
-}
-function runEditFix(p, usr, label){
-  var sys="You are the BUILDER applying "+label+". Do NOT rewrite whole files. Return ONLY small search/replace edits. "
-    +"Each edit: path (file path from CURRENT CODE), find (an exact snippet copied VERBATIM from CURRENT CODE, unique in that file, "
-    +"usually 2-12 lines with enough context), replace (the new text for that snippet). Keep edits minimal; preserve everything else. "
-    +(stackRule() ? "Keep the existing single-file architecture. " : "")
-    +"Return ONLY valid JSON, no markdown: {\"summary\":string,\"edits\":[{\"path\":string,\"find\":string,\"replace\":string}],\"not_implemented\":[string]}";
-  return callModel("builder", sys, usr).then(function(r){
-    var j=extractJson(r.text);
-    if(!j || !Array.isArray(j.edits) || !j.edits.length) throw new Error("no usable edits");
-    var res=applyEdits((p.build&&p.build.files)||[], j.edits);
-    if(res.failed.length || !res.applied) throw new Error("edits did not apply ("+res.failed.slice(0,2).join("; ")+")");
-    var nb=JSON.parse(JSON.stringify(p.build||{}));
-    nb.files=res.files; nb.summary=String(j.summary||label)+" ["+res.applied+" edit(s)]";
-    nb.not_implemented=j.not_implemented||nb.not_implemented||[];
-    return nb;
-  });
-}
-function withEditFallback(p, usr, label, fullCall){
-  return runEditFix(p, usr, label).catch(function(e){
-    if(e && e.status===429) throw e;
-    logActivity(p,"Builder","Edit-mode fix failed ("+String(e&&e.message||e).slice(0,120)+") \u2014 falling back to full rewrite.");
-    return fullCall();
   });
 }
 function runBuilderFix(p){
@@ -821,9 +769,9 @@ function runBuilderFix(p){
     +(execText?("\nSANDBOX FAILURES (real, from the current build):\n"+execText):"")
     +openUserBugsText(p)
     +"\nCURRENT CODE:\n"+filesCtx;
-  return withEditFallback(p, usr, "QA fixes", function(){ return callModel("builder", sys, usr).then(function(r){
+  return callModel("builder", sys, usr).then(function(r){
     var j=extractJson(r.text); if(!j||!j.files) throw new Error("Builder fix returned unparseable output."); return j;
-  }); });
+  });
 }
 function stepExec(id){
   var p=getProject(id); if(!p) return;
@@ -1139,9 +1087,9 @@ function runSecurityFix(p){
     +"Return ONLY valid JSON, no markdown: {\"summary\":string,\"files\":[{\"path\":string,\"language\":string,\"content\":string}],"
     +"\"run_commands\":[string],\"how_to_run\":string,\"not_implemented\":[string]}";
   var usr="REQUIREMENTS:\n"+p.description+"\n\nSECURITY FINDINGS TO FIX:\n"+fx+"\nCURRENT CODE:\n"+filesCtx;
-  return withEditFallback(p, usr, "AUTHORIZED security fixes (fix only the listed issues, never add secrets)", function(){ return callModel("builder", sys, usr).then(function(r){
+  return callModel("builder", sys, usr).then(function(r){
     var j=extractJson(r.text); if(!j||!j.files) throw new Error("Security fix returned unparseable output."); return j;
-  }); });
+  });
 }
 function stepDepAudit(id){
   var p=getProject(id); if(!p) return;
@@ -1193,7 +1141,7 @@ function wfStepObj(p,key){ for(var i=0;i<p.workflow.steps.length;i++){ if(p.work
 function wfLabel(w,key){ for(var i=0;i<w.steps.length;i++){ if(w.steps[i].key===key) return w.steps[i].label; } return key; }
 function classifyError(err){
   var st = err && err.status; var msg = (err && err.message) || "";
-  if(/output truncated/i.test(msg)) return ((err&&err.agent)==="qa"?"QA":"Builder")+" output was cut off twice. Tap Resume/Retry once more; if it repeats, set a different "+((err&&err.agent)==="qa"?"QA":"Builder")+" model in Settings (e.g. llama-3.3-70b-versatile on Groq) or simplify the request.";
+  if(/output truncated/i.test(msg)) return "Builder output was cut off twice. Tap Resume/Retry once more; if it repeats, set a different Builder model in Settings (e.g. llama-3.3-70b-versatile on Groq) or simplify the request.";
   /* Sandbox runner errors (checked first so they are not mistaken for model errors) */
   if(/sandbox runner unreachable/i.test(msg)) return "Runner unreachable — set ALLOWED_ORIGIN on Render exactly as shown above, confirm the service is Live, then Resume.";
   if(/sandbox runner url/i.test(msg)) return "Fix the Sandbox runner URL in Settings, then Resume.";
@@ -1239,9 +1187,6 @@ function workflowIssues(p){
   return { hard:hard, soft:soft };
 }
 function runtimeLabel(p){
-  if(p.qa && p.qa.ui && (p.qa.ui.passed+p.qa.ui.failed)>0 && !(p.exec && p.exec.success===false)){
-    return "browser UI tests: "+p.qa.ui.passed+" passed, "+p.qa.ui.failed+" failed (current build)";
-  }
   if(p.exec && p.exec.configured){
     if(p.exec.success===false) return "executed — tests FAILED (current build)";
     return execEvidence(p)==="syntax" ? "syntax-checked only — behaviour untested (current build)" : "executed & passed (current build)";
