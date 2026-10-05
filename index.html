@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="so">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>AI App Factory has moved</title>
+<style>
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0f2a4a;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box}
+.c{max-width:420px}
+h1{font-size:22px;margin:0 0 12px}
+p{font-size:16px;line-height:1.5;opacity:.9}
+a{display:inline-block;margin-top:16px;padding:14px 22px;background:#fff;color:#0f2a4a;border-radius:10px;font-weight:700;text-decoration:none}
+small{display:block;margin-top:18px;opacity:.6}
+</style>
+</head>
+<body>
+<div class="c">
+<h1>AI App Factory waa la raray</h1>
+<p id="msg">Furayaashii hore ee qalabkan waa la tirtirayaa…</p>
+<a href="https://hansan-factory.github.io/ai-app-factory/">Fur factory-ga cusub</a>
+<small>AI App Factory has moved to hansan-factory.github.io</small>
+</div>
+<script>
+/* Removes ONLY the factory's own storage keys on this origin.
+   Published apps under /apps/ and other apps on this domain are left untouched. */
+(function(){
+  var KEYS=["aiaf_settings_v1","aiaf_github_v1","aiaf_cloud_v1","aiaf_appcloud_v1",
+    "aiaf_projects_v1","aiaf_projects","aiaf_custom_agents_v1","aiaf_eng_lessons_v1",
+    "aiaf_eng_lessons_ts","aiaf_research_v1","aiaf_research_ts","aiaf_lang_v1",
+    "aiaf_toklim_v1","aiaf_toklog_v1","aiaf_sb_auth"];
+  var n=0;
+  try{ KEYS.forEach(function(k){ if(localStorage.getItem(k)!==null){ localStorage.removeItem(k); n++; } }); }catch(e){}
+  var m=document.getElementById("msg");
+  m.textContent = n ? ("Waa la tirtiray "+n+" xog oo factory-ga hore ah. Waxaa laguu gudbinayaa link-ga cusub…")
+                    : "Xog factory hore ah kuma jirto qalabkan. Waxaa laguu gudbinayaa link-ga cusub…";
+  setTimeout(function(){ location.replace("https://hansan-factory.github.io/ai-app-factory/"); }, 4000);
+})();
+</script>
+</body>
+</html>
